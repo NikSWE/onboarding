@@ -1,0 +1,62 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: cirrusci/flutter:latest
+    working_directory: ~/repo
+    steps:
+      - checkout
+      - run:
+          name: Flutter Stats
+          command: flutter --version
+      - run:
+          name: Install Dependencies
+          command: flutter pub get
+      - run:
+          name: Build APK
+          command: flutter build apk
+      - run:
+          name: Generate new name for APK
+          command: |
+            VERSION=$(cat pubspec.yaml | grep "^version" | cut -d ":" -f 2 | cut -d "+" -f 1 | tr -d '[:space:]' | sed "s/.*/v\0/")
+            NAME=$(cat pubspec.yaml | grep "^name" | cut -d ":" -f 2 | tr -d '[:space:]')
+            NEW_NAME=$(echo "${NAME}_${VERSION}")
+            mv build/app/outputs/apk/release/app-release.apk build/app/outputs/apk/release/${NEW_NAME}.apk
+
+      - persist_to_workspace:
+          root: ~/repo
+          paths:
+            - build/app/outputs/apk/release/*.apk
+            - pubspec.yaml
+
+  release:
+    docker:
+      - image: circleci/golang:latest
+    steps:
+      - attach_workspace:
+          at: ~/repo
+      - run:
+          name: "Install Dependencies"
+          command: go get github.com/tcnksm/ghr
+      - run:
+          name: "Release to GITHUB"
+          command: |
+            VERSION=$(cat ~/repo/pubspec.yaml | grep "^version" | cut -d ":" -f 2 | cut -d "+" -f 1 | tr -d '[:space:]' | sed "s/.*/v\0/")
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -delete ${VERSION} ~/repo/build/app/outputs/apk/release/*.apk
+
+workflows:
+  version: 2
+  main:
+    jobs:
+      - build:
+          filters:
+            branches:
+              only:
+                - master
+      - release:
+          requires:
+            - build
+          filters:
+            branches:
+              only:
+                - master
